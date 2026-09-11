@@ -1,0 +1,87 @@
+name: publish-image
+
+# Publishes a MinIO container image built from this repository's source to
+# ghcr.io/fil-forge/minio.
+#
+# WHY THIS FORK PUBLISHES AT ALL
+#
+# Upstream withdrew minio/minio from Docker Hub on 2026-09-11 (Quay too), and
+# archived the repository on 2026-04-25. There is no upstream image to pull
+# and no upstream release to wait for. Anything we run has to be built from
+# source, and this fork is where that source lives.
+#
+# DISPATCH ONLY, DELIBERATELY
+#
+# Not triggered by tag pushes. This fork carries 523 upstream release tags
+# that arrive in bulk; a tag trigger would either fan out into hundreds of
+# runs or silently fire for none. Publishing a version should be a deliberate
+# act with a person's name on it, which is also the habit whose absence let a
+# ten-month-old image run unnoticed.
+#
+# HOW THE TWO CHECKOUTS FIT
+#
+# The build recipe lives on this branch; the source being built is an
+# upstream release tag that predates it. So the source is checked out at the
+# requested ref, and the Dockerfile comes from this branch and is pointed at
+# it. Our packaging, upstream's source, no mixing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Upstream release tag to build'
+        required: true
+        default: 'RELEASE.2025-10-15T17-29-55Z'
+      tag_suffix:
+        description: 'Optional suffix, for when we patch a release (e.g. "fil.1")'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish ${{ inputs.ref }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: check out the build recipe
+        uses: actions/checkout@v4
+        with:
+          path: recipe
+
+      - name: check out MinIO source at ${{ inputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: src
+
+      - name: compose image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.ref }}'
+          suffix='${{ inputs.tag_suffix }}'
+          [ -n "$suffix" ] && tag="${tag}-${suffix}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ghcr.io/fil-forge/minio:$tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          # Context is upstream's source; the Dockerfile is ours.
+          context: src
+          file: recipe/Dockerfile
+          target: prod
+          push: true
+          tags: ghcr.io/fil-forge/minio:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.version=${{ inputs.ref }}
+            org.opencontainers.image.revision=${{ github.sha }}
