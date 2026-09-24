@@ -74,12 +74,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/build-push-action@v6
         with:
           # Context is upstream's source; the Dockerfile is ours.
           context: src
           file: recipe/Dockerfile
           target: prod
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/fil-forge/minio:${{ steps.tag.outputs.tag }}
           labels: |
